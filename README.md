@@ -1,15 +1,17 @@
 # Gemini Exfil Detector
 
-**AI-Assisted Insider Threat Detection for Google Workspace**
+AI-Assisted Insider Threat Detection for Google Workspace
 
 Detects when users leverage Gemini AI to analyze sensitive files ("recon") and then immediately share or exfiltrate them ("exfil")—a high-signal insider risk pattern.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
+**Note:** This is released as a proof-of-concept detection. Test thoroughly in your environment before production deployment.
+
 ---
 
-## 🎯 What It Catches
+## What It Catches
 
 The **LLM-aided "read-then-share" pattern** that insiders use to rapidly understand and move sensitive documents:
 
@@ -24,35 +26,29 @@ This correlation produces a **high-signal insider-risk detector** without readin
 
 ---
 
-## 🔍 Why It's Interesting
+## Why It Works
 
-### Unique Detection Surface
+Traditional DLP focuses on content. This detector focuses on behavioral sequence:
 
-Traditional DLP focuses on content. This detector focuses on **behavioral sequence**:
+- **Gemini logs** reveal intent (what files the user wanted to understand)
+- **Drive audit logs** reveal action (what the user did with those files)
+- **Temporal correlation** reveals insider TTP
 
-- **Gemini logs** reveal *intent* (what files the user wanted to understand)
-- **Drive audit logs** reveal *action* (what the user did with those files)
-- **Temporal correlation** reveals *insider TTP*
+You won't get Gemini prompt/response content, but you will get:
 
-### High-Fidelity Signal
+- Precise actions (`ask_about_this_file`, `summarize_file`, `catch_me_up`)
+- App context (docs, drive, sheets, slides)
+- Reliable timestamps (to the second)
+- Actor email and file IDs
 
-You won't get Gemini prompt/response content, but you **will** get:
+Google's documentation positions these logs for security telemetry:
 
-- ✅ Precise actions (`ask_about_this_file`, `summarize_file`, `catch_me_up`)
-- ✅ App context (docs, drive, sheets, slides)
-- ✅ Reliable timestamps (to the second)
-- ✅ Actor email and file IDs
-
-### Google-Recommended Use Case
-
-Google's own documentation positions these logs for exactly this kind of security telemetry:
-
-> *"Gemini in Workspace apps activities can help you understand how generative AI is being used in your organization, for compliance, security, and risk management."*  
+> "Gemini in Workspace apps activities can help you understand how generative AI is being used in your organization, for compliance, security, and risk management."  
 > — [Google Workspace Admin SDK](https://developers.google.com/workspace/admin/reports/v1/appendix/activity/gemini-in-workspace-apps)
 
 ---
 
-## 📊 Detection Logic
+## Detection Logic
 
 ```
 IF user_action IN {ask_about_this_file, summarize_file, analyze_documents, ...}
@@ -72,7 +68,7 @@ THEN alert(severity = HIGH/MEDIUM/LOW)
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -113,7 +109,7 @@ python src/detector.py --config config/config.json --verbose
 
 ---
 
-## 📋 Data Sources
+## Data Sources
 
 ### Gemini Events
 - **API**: Admin SDK Reports API (`gemini_in_workspace_apps`)
@@ -134,7 +130,7 @@ python src/detector.py --config config/config.json --verbose
 
 ---
 
-## 🛠️ Configuration
+## Configuration
 
 ### Minimal Config
 
@@ -188,7 +184,7 @@ python src/detector.py --config config/config.json --verbose
 
 ---
 
-## 🔐 Setup Guide
+## Setup Guide
 
 ### 1. Create Service Account
 
@@ -218,7 +214,7 @@ Choose your deployment method:
 
 ---
 
-## 📈 Output Format
+## Output Format
 
 ```json
 [
@@ -244,7 +240,7 @@ Choose your deployment method:
 
 ---
 
-## 🎛️ Tuning
+## Tuning
 
 ### Time Windows
 
@@ -288,7 +284,7 @@ Add to config to reduce false positives:
 
 ---
 
-## 🧪 Testing
+## Testing
 
 Create a test scenario to verify detection:
 
@@ -304,7 +300,7 @@ Create a test scenario to verify detection:
 
 ---
 
-## 📊 Operational Metrics
+## Operational Metrics
 
 Track these metrics for detector health:
 
@@ -316,7 +312,7 @@ Track these metrics for detector health:
 
 ---
 
-## 🔄 Extensions
+## Extensions
 
 ### 1. Bulk Recon + Mass Exfil
 
@@ -340,7 +336,7 @@ Detect Gemini usage across multiple sensitive files from different OUs, suggesti
 
 ---
 
-## 🛡️ Security Best Practices
+## Security Best Practices
 
 1. **Protect service account key**: Store in secrets manager (GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault)
 2. **Least privilege**: Service account only has `admin.reports.audit.readonly` scope
@@ -350,7 +346,7 @@ Detect Gemini usage across multiple sensitive files from different OUs, suggesti
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 - [**Setup Guide**](docs/SETUP.md) - Detailed installation and deployment
 - [**Tuning Guide**](docs/TUNING.md) - Calibration and false positive reduction
@@ -359,50 +355,23 @@ Detect Gemini usage across multiple sensitive files from different OUs, suggesti
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions welcome. Open an issue or pull request.
 
 ---
 
-## ⚖️ License
+## License
 
 MIT License - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Google Workspace Admin SDK team for comprehensive audit logging
 - Gemini team for exposing granular usage events
-- Security community for insider threat research
 
 ---
 
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/gemini-exfil-detector/issues)
-- **Security**: Report security issues to security@your-domain.com
-
----
-
-## 🗓️ Roadmap
-
-- [ ] Machine learning risk scoring
-- [ ] Automated response actions (revoke link, notify owner)
-- [ ] Integration with SOAR platforms
-- [ ] User risk scoring dashboard
-- [ ] Real-time streaming mode (Pub/Sub)
-- [ ] Multi-workspace support
-
----
-
-**Built for security teams who need actionable insider threat detection without content inspection.**
-
-*Last updated: January 2025*
+*This is released as a proof-of-concept. No warranty or support is provided.*
