@@ -1,0 +1,87 @@
+[
+  {
+    "severity": "high",
+    "actor": "john.doe@company.com",
+    "exfil_event": "change_visibility",
+    "exfil_time": "2025-01-15T14:23:45-08:00",
+    "doc_id": "1abc123def456",
+    "doc_title": "Q4 Financial Projections.xlsx",
+    "recon_action": "summarize_file",
+    "recon_time": "2025-01-15T14:18:12-08:00",
+    "delta_minutes": 5.55,
+    "visibility": "people_with_link",
+    "reason": "External share within 10min of recon",
+    "event_ids": {
+      "recon": "gemini_evt_abc123",
+      "exfil": "drive_evt_def456"
+    }
+  },
+  {
+    "severity": "high",
+    "actor": "jane.smith@company.com",
+    "exfil_event": "export",
+    "exfil_time": "2025-01-15T09:47:22-08:00",
+    "doc_id": "2xyz789ghi012",
+    "doc_title": "Customer Database - Confidential",
+    "recon_action": "ask_about_this_file",
+    "recon_time": "2025-01-15T09:39:15-08:00",
+    "delta_minutes": 8.12,
+    "visibility": null,
+    "reason": "Export/download within 10min of recon",
+    "event_ids": {
+      "recon": "gemini_evt_xyz789",
+      "exfil": "drive_evt_ghi012"
+    }
+  },
+  {
+    "severity": "medium",
+    "actor": "bob.johnson@company.com",
+    "exfil_event": "download",
+    "exfil_time": "2025-01-14T16:32:18-08:00",
+    "doc_id": "3mno345pqr678",
+    "doc_title": "Product Roadmap 2025.pptx",
+    "recon_action": "summarize_long",
+    "recon_time": "2025-01-14T16:18:03-08:00",
+    "delta_minutes": 14.25,
+    "visibility": null,
+    "reason": "Suspicious activity within 30min",
+    "event_ids": {
+      "recon": "gemini_evt_mno345",
+      "exfil": "drive_evt_pqr678"
+    }
+  },
+  {
+    "severity": "medium",
+    "actor": "alice.williams@company.com",
+    "exfil_event": "change_acl",
+    "exfil_time": "2025-01-14T11:45:33-08:00",
+    "doc_id": "4stu901vwx234",
+    "doc_title": "M&A Target Analysis",
+    "recon_action": "analyze_documents",
+    "recon_time": "2025-01-14T11:28:47-08:00",
+    "delta_minutes": 16.77,
+    "visibility": "shared_externally",
+    "reason": "Suspicious activity within 30min",
+    "event_ids": {
+      "recon": "gemini_evt_stu901",
+      "exfil": "drive_evt_vwx234"
+    }
+  },
+  {
+    "severity": "low",
+    "actor": "charlie.brown@company.com",
+    "exfil_event": "add_to_folder",
+    "exfil_time": "2025-01-13T15:12:09-08:00",
+    "doc_id": "5yza567bcd890",
+    "doc_title": "Team Meeting Notes - 2025-01-13",
+    "recon_action": "catch_me_up",
+    "recon_time": "2025-01-13T14:47:21-08:00",
+    "delta_minutes": 24.8,
+    "visibility": null,
+    "reason": "Activity correlation detected",
+    "event_ids": {
+      "recon": "gemini_evt_yza567",
+      "exfil": "drive_evt_bcd890"
+    }
+  }
+]

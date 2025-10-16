@@ -1,0 +1,11 @@
+[Unit]
+Description=Gemini Exfil Detector Timer
+Requires=gemini-exfil-detector.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

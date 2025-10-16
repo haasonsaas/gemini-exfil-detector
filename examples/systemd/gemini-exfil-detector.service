@@ -1,0 +1,29 @@
+[Unit]
+Description=Gemini Exfil Detector
+After=network.target
+
+[Service]
+Type=oneshot
+User=gemini-detector
+Group=gemini-detector
+WorkingDirectory=/opt/gemini-exfil-detector
+Environment="PATH=/opt/gemini-exfil-detector/venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+ExecStart=/opt/gemini-exfil-detector/venv/bin/python \
+    /opt/gemini-exfil-detector/src/detector.py \
+    --config /opt/gemini-exfil-detector/config/config.json \
+    --lookback-hours 1 \
+    --output /var/lib/gemini-exfil-detector/findings.json
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gemini-exfil-detector
+
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/gemini-exfil-detector
+
+[Install]
+WantedBy=multi-user.target

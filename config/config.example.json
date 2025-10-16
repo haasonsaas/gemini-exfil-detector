@@ -1,0 +1,36 @@
+{
+  "service_account_path": "/path/to/service-account.json",
+  "delegated_user": "admin@your-domain.com",
+  "customer_id": "my_customer",
+  "timezone": "America/Los_Angeles",
+  "suppressions": {
+    "allowed_external_domains": [
+      "partner-company.com",
+      "trusted-vendor.com"
+    ],
+    "security_investigation_ous": [
+      "/Security",
+      "/IT/SecOps"
+    ],
+    "exclude_actors": [
+      "serviceaccount@your-domain.com"
+    ]
+  },
+  "severity_overrides": {
+    "high_risk_ous": [
+      "/Executives",
+      "/Finance",
+      "/Research"
+    ],
+    "sensitive_labels": [
+      "confidential",
+      "restricted",
+      "internal-only"
+    ]
+  },
+  "alerting": {
+    "webhook_url": "https://your-siem.com/webhooks/gemini-exfil",
+    "alert_on_severities": ["high", "medium"],
+    "rate_limit_minutes": 5
+  }
+}
