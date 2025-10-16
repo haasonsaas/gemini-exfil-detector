@@ -18,6 +18,8 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional
 
+from burstiness import BurstinessAnalyzer
+
 DECAY_HALF_LIFE_HOURS = 48  # Score decays 50% every 48 hours
 SCORE_THRESHOLD_HIGH = 10.0  # High-risk recon activity threshold
 SCORE_THRESHOLD_MEDIUM = 5.0
@@ -39,6 +41,7 @@ class ReconTracker:
         self.ttl_seconds = ttl_days * 24 * 60 * 60
         self.redis_client = None
         self.memory_store: Dict[str, List[Dict]] = {}
+        self.burstiness_analyzer = BurstinessAnalyzer()
 
         if redis_url:
             try:
@@ -177,3 +180,34 @@ class ReconTracker:
         elif score >= SCORE_THRESHOLD_MEDIUM:
             return "medium"
         return "low"
+
+    def get_burstiness_score(self, actor: str, window_minutes: int = 30) -> float:
+        """Calculate burstiness for recent recon activity"""
+        key = f"recon:{actor}"
+        activities = []
+
+        if self.redis_client:
+            try:
+                activities = self._get_redis_activities(key)
+            except Exception:
+                activities = self.memory_store.get(key, [])
+        else:
+            activities = self.memory_store.get(key, [])
+
+        cutoff = dt.datetime.utcnow() - dt.timedelta(minutes=window_minutes)
+        recent_timestamps = []
+
+        for activity_data in activities:
+            try:
+                timestamp = dt.datetime.fromisoformat(activity_data["timestamp"])
+                if timestamp >= cutoff:
+                    recent_timestamps.append(timestamp)
+            except (KeyError, ValueError):
+                continue
+
+        if len(recent_timestamps) < 2:
+            return 0.0
+
+        return self.burstiness_analyzer.calculate_burstiness_score(
+            recent_timestamps, len(recent_timestamps)
+        )

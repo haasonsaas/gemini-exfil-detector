@@ -25,6 +25,10 @@
     "1abc_exec_folder_id",
     "2def_finance_folder_id"
   ],
+  "canary_doc_ids": [
+    "1canary_doc_financial_2025",
+    "2canary_doc_customer_list"
+  ],
   "severity_overrides": {
     "high_risk_ous": [
       "/Executives",

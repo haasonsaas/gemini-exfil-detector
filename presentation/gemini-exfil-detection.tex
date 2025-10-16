@@ -228,8 +228,11 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
   "exfil_event": "change_visibility",
   "doc_title": "Q4 Financial Projections.xlsx",
   "delta_minutes": 5.55,
-  "reason": "External share within 10min; High recon score (12.5)",
+  "reason": "External toggle with rapid revert; High recon score (12.5)",
+  "reason_codes": ["external_toggle_revert", "high_recon_score"],
   "recon_score": 12.5,
+  "burstiness_score": 8.3,
+  "ip_address": "203.0.113.42",
   "file_context": {
     "sensitivity": "high",
     "labels": ["confidential", "finance"],
@@ -240,7 +243,8 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
     "confidence": 0.85,
     "reasons": ["Unknown destination domain",
                 "Sharing someone else's file",
-                "Off-hours activity"],
+                "Off-hours activity",
+                "New ASN for actor"],
     "destination_domain": "competitor.com"
   }
 }
@@ -366,16 +370,58 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Advanced Features Implemented}
+\section{Evasion \& Hardening}
+
+\begin{frame}{Attacker Evasion Techniques}
+\textbf{How would sophisticated insiders try to bypass this?}
+
+\vspace{1em}
+
+\begin{enumerate}
+    \item \textbf{Time-delayed exfil:} Recon on Day 1, wait 72 hours, exfil on Day 3
+    \item \textbf{Quick-toggle:} Share externally → download → immediately revert to private
+    \item \textbf{Shortcut evasion:} Create shortcut to external shared drive instead of direct share
+    \item \textbf{Ownership transfer:} Transfer ownership to external account
+    \item \textbf{Slow-drip recon:} Spread Gemini queries over days to stay under threshold
+\end{enumerate}
+
+\vspace{1em}
+
+\begin{alertblock}{Detection Challenge}
+Traditional 30-minute correlation windows miss delayed and obfuscated patterns.
+\end{alertblock}
+\end{frame}
+
+\begin{frame}{Advanced Detection Features}
 \textbf{Multi-Stage Attack Detection:}
 \begin{itemize}
     \item Cumulative recon scoring with 48hr decay half-life
     \item Detects delayed exfil (Day 1: recon, Day 3: exfil)
-    \item Redis-backed stateful tracking (with in-memory fallback)
+    \item Burstiness analysis (rapid-fire queries = high risk)
+    \item Redis-backed stateful tracking (persistent across runs)
 \end{itemize}
 
 \vspace{1em}
 
+\textbf{Evasion Hardening:}
+\begin{itemize}
+    \item \textbf{Revert-to-clean detection:} External share + rapid revert within 10min → HIGH
+    \item \textbf{Expanded exfil signals:} Shortcuts, ownership transfer, publish\_to\_web, move
+    \item \textbf{IP/Geo anomaly:} New IP/ASN during exfil phase
+    \item \textbf{Structured reason codes:} external\_toggle\_revert, burst\_recon, canary\_doc\_access
+\end{itemize}
+
+\vspace{1em}
+
+\textbf{Honeypot/Canary Support:}
+\begin{itemize}
+    \item Tag decoy high-value docs in config
+    \item \textbf{Any} Gemini recon on canary → immediate HIGH severity alert
+    \item No content inspection needed—pure metadata signal
+\end{itemize}
+\end{frame}
+
+\begin{frame}{File Context \& Intent Classification}
 \textbf{File Context Enrichment:}
 \begin{itemize}
     \item File sensitivity classification (labels, ownership, sharing history)
@@ -416,19 +462,38 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
 
 \section{Conclusion}
 
+\begin{frame}{Live Demo Scenarios}
+\textbf{Red Team vs. Blue Team:}
+
+\vspace{1em}
+
+\begin{enumerate}
+    \item \textbf{Naive Attack:} Recon → immediate exfil (CAUGHT: immediate correlation)
+    \item \textbf{Quick-Toggle Evasion:} External share → download → revert in 5 min (CAUGHT: revert-to-clean pattern)
+    \item \textbf{Delayed Exfil:} Day 1 recon → Day 3 export (CAUGHT: cumulative recon score)
+    \item \textbf{Shortcut Evasion:} Create shortcut to external shared drive (CAUGHT: expanded exfil signals)
+    \item \textbf{Canary Trap:} Any Gemini query on honeypot doc (CAUGHT: instant HIGH alert)
+\end{enumerate}
+
+\vspace{1em}
+
+\textbf{Result:} 5/5 evasion attempts detected with enhanced logic
+\end{frame}
+
 \begin{frame}{Key Takeaways}
 \begin{enumerate}
     \item \textbf{New Attack Surface:} LLMs enable rapid, efficient insider reconnaissance
     \item \textbf{Behavioral Detection:} Focus on sequences, not content
-    \item \textbf{High-Signal:} Temporal correlation of recon + exfil is highly indicative
-    \item \textbf{Privacy-Preserving:} No content inspection required
-    \item \textbf{Actionable:} Deploy today with Google Admin SDK
+    \item \textbf{Evasion-Aware:} Detect revert-to-clean, delayed exfil, obfuscation tactics
+    \item \textbf{Privacy-Preserving:} No content inspection—pure metadata telemetry
+    \item \textbf{Canary-Enhanced:} Honeypot docs provide ground-truth high-signal alerts
+    \item \textbf{Actionable:} Deploy today with Google Admin SDK + open-source code
 \end{enumerate}
 
 \vspace{1em}
 
 \begin{block}{The Bottom Line}
-AI-assisted insider threats require AI-aware detection. This technique provides high-fidelity telemetry without compromising user privacy.
+AI-assisted insider threats require AI-aware detection with evasion hardening. This technique provides high-fidelity behavioral telemetry that catches sophisticated attackers.
 \end{block}
 \end{frame}
 

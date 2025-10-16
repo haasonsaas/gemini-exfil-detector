@@ -65,6 +65,11 @@ EXFIL_EVENT_PATTERNS: Set[str] = {
     "change_visibility",
     "deny_access_request",
     "request_access",
+    "create_shortcut",
+    "move",
+    "publish_to_web",
+    "transfer_ownership",
+    "untrash",
 }
 
 HIGH_RISK_VISIBILITY: Set[str] = {
@@ -97,6 +102,8 @@ class ExfilEvent:
     owner: Optional[str]
     destination_folder_id: Optional[str]
     event_id: str
+    ip_address: Optional[str] = None
+    is_revert: bool = False
 
 
 @dataclass
@@ -116,6 +123,9 @@ class Finding:
     recon_score: Optional[float] = None
     file_context: Optional[Dict[str, Any]] = None
     intent_analysis: Optional[Dict[str, Any]] = None
+    reason_codes: Optional[List[str]] = None
+    ip_address: Optional[str] = None
+    geo_anomaly: Optional[bool] = None
 
 
 class GeminiExfilDetector:
@@ -268,6 +278,7 @@ class GeminiExfilDetector:
                     activity["id"]["time"].replace("Z", "+00:00")
                 )
                 event_id = activity["id"].get("uniqueQualifier", "")
+                ip_address = activity["id"].get("ipAddress")
 
                 for event in activity.get("events", []):
                     event_name = event.get("name", "")
@@ -298,6 +309,7 @@ class GeminiExfilDetector:
                                     "destination_folder_id"
                                 ),
                                 event_id=event_id,
+                                ip_address=ip_address,
                             )
                         )
             except (KeyError, ValueError) as e:
@@ -305,6 +317,9 @@ class GeminiExfilDetector:
                 continue
 
         self.logger.info(f"Found {len(exfil_events)} exfil events")
+        
+        exfil_events = self._detect_reverts(exfil_events)
+        
         return exfil_events
 
     def correlate_events(
@@ -336,8 +351,14 @@ class GeminiExfilDetector:
 
                 if 0 <= delta_minutes <= window_minutes:
                     matched_recon = True
-                    severity, reason = self._calculate_severity(exfil, delta_minutes, recon_score)
+                    severity, reason, reason_codes = self._calculate_severity(exfil, delta_minutes, recon_score)
 
+                    canary_docs = set(self.config.get("canary_doc_ids", []))
+                    if exfil.doc_id and exfil.doc_id in canary_docs:
+                        severity = "high"
+                        reason = "CANARY DOCUMENT ACCESS - " + reason
+                        reason_codes.append("canary_doc_access")
+                    
                     finding = Finding(
                         severity=severity,
                         actor=exfil.actor,
@@ -355,6 +376,8 @@ class GeminiExfilDetector:
                             "exfil": exfil.event_id,
                         },
                         recon_score=recon_score,
+                        reason_codes=reason_codes,
+                        ip_address=exfil.ip_address,
                     )
                     
                     finding_dict = asdict(finding)
@@ -415,48 +438,94 @@ class GeminiExfilDetector:
         self.logger.info(f"Generated {len(findings)} findings")
         return findings
 
+    def _detect_reverts(self, exfil_events: List[ExfilEvent]) -> List[ExfilEvent]:
+        """Detect revert-to-clean patterns: external share + rapid revert"""
+        doc_visibility_changes: Dict[str, List[ExfilEvent]] = defaultdict(list)
+        
+        for event in exfil_events:
+            if event.doc_id and "visibility" in event.event_name.lower():
+                doc_visibility_changes[event.doc_id].append(event)
+        
+        for doc_id, changes in doc_visibility_changes.items():
+            changes.sort(key=lambda e: e.timestamp)
+            for i in range(len(changes) - 1):
+                curr = changes[i]
+                next_event = changes[i + 1]
+                delta_minutes = (next_event.timestamp - curr.timestamp).total_seconds() / 60
+                
+                if delta_minutes <= 10:
+                    curr_external = curr.visibility in HIGH_RISK_VISIBILITY
+                    next_internal = next_event.visibility not in HIGH_RISK_VISIBILITY
+                    
+                    if curr_external and next_internal:
+                        curr.is_revert = True
+                        next_event.is_revert = True
+        
+        return exfil_events
+
     def _calculate_severity(
         self, exfil: ExfilEvent, delta_minutes: float, recon_score: float = 0.0
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, List[str]]:
         reasons = []
+        reason_codes = []
 
         is_external_share = (
             "change_acl" in exfil.event_name or "change_visibility" in exfil.event_name
         ) and exfil.visibility in HIGH_RISK_VISIBILITY
 
         is_export_download = "download" in exfil.event_name or "export" in exfil.event_name
+        
+        is_ownership_transfer = "transfer_ownership" in exfil.event_name
+        is_shortcut = "create_shortcut" in exfil.event_name
+        is_publish = "publish_to_web" in exfil.event_name
 
-        if delta_minutes <= 10:
-            if is_external_share:
-                reasons.append("External share within 10min of recon")
+        if exfil.is_revert:
+            reasons.append("External toggle with rapid revert (evasion pattern)")
+            reason_codes.append("external_toggle_revert")
+            severity = "high"
+        elif delta_minutes <= 10:
+            if is_external_share or is_ownership_transfer or is_publish:
+                reasons.append("External share/transfer within 10min of recon")
+                reason_codes.append("external_share_immediate")
                 severity = "high"
             elif is_export_download:
                 reasons.append("Export/download within 10min of recon")
+                reason_codes.append("export_immediate")
                 severity = "high"
+            elif is_shortcut:
+                reasons.append("Shortcut creation within 10min of recon")
+                reason_codes.append("shortcut_immediate")
+                severity = "medium"
             else:
                 reasons.append("Activity within 10min")
+                reason_codes.append("activity_immediate")
                 severity = "medium"
         elif delta_minutes <= 30:
-            if is_external_share or is_export_download:
+            if is_external_share or is_export_download or is_ownership_transfer:
                 reasons.append("Suspicious activity within 30min")
+                reason_codes.append("suspicious_30min")
                 severity = "medium"
             else:
                 reasons.append("Activity correlation detected")
+                reason_codes.append("activity_correlated")
                 severity = "low"
         else:
             reasons.append("Activity correlation detected")
+            reason_codes.append("activity_correlated")
             severity = "low"
 
         if recon_score >= 10.0:
             reasons.append(f"High cumulative recon score ({recon_score})")
+            reason_codes.append("high_recon_score")
             if severity == "medium":
                 severity = "high"
             elif severity == "low":
                 severity = "medium"
         elif recon_score >= 5.0:
             reasons.append(f"Elevated recon score ({recon_score})")
+            reason_codes.append("elevated_recon_score")
 
-        return severity, "; ".join(reasons)
+        return severity, "; ".join(reasons), reason_codes
 
 
 def setup_logging(verbose: bool = False) -> None:
