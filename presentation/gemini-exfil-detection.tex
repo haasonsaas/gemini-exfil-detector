@@ -220,20 +220,29 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
 \end{itemize}
 \end{frame}
 
-\begin{frame}[fragile]{Example Finding}
+\begin{frame}[fragile]{Example Finding (Enhanced)}
 \begin{lstlisting}[basicstyle=\ttfamily\tiny]
 {
   "severity": "high",
   "actor": "john.doe@company.com",
   "exfil_event": "change_visibility",
-  "exfil_time": "2025-01-15T14:23:45-08:00",
-  "doc_id": "1abc123def456",
   "doc_title": "Q4 Financial Projections.xlsx",
-  "recon_action": "summarize_file",
-  "recon_time": "2025-01-15T14:18:12-08:00",
   "delta_minutes": 5.55,
-  "visibility": "people_with_link",
-  "reason": "External share within 10min of recon"
+  "reason": "External share within 10min; High recon score (12.5)",
+  "recon_score": 12.5,
+  "file_context": {
+    "sensitivity": "high",
+    "labels": ["confidential", "finance"],
+    "owner": "cfo@company.com"
+  },
+  "intent_analysis": {
+    "intent": "malicious",
+    "confidence": 0.85,
+    "reasons": ["Unknown destination domain",
+                "Sharing someone else's file",
+                "Off-hours activity"],
+    "destination_domain": "competitor.com"
+  }
 }
 \end{lstlisting}
 \end{frame}
@@ -314,8 +323,13 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
 \begin{frame}{Deployment Checklist}
 \begin{enumerate}
     \item Create service account with domain-wide delegation
-    \item Grant \texttt{admin.reports.audit.readonly} scope
-    \item Configure suppressions for your environment
+    \item Grant scopes:
+        \begin{itemize}
+            \item \texttt{admin.reports.audit.readonly}
+            \item \texttt{drive.readonly} (for file context)
+        \end{itemize}
+    \item Configure Redis for stateful recon tracking (optional)
+    \item Configure partner domains \& suppressions
     \item Test with known benign patterns
     \item Start with observation mode (no alerts)
     \item Gradually enable alerting by severity
@@ -352,12 +366,40 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
 \end{itemize}
 \end{frame}
 
+\begin{frame}{Advanced Features Implemented}
+\textbf{Multi-Stage Attack Detection:}
+\begin{itemize}
+    \item Cumulative recon scoring with 48hr decay half-life
+    \item Detects delayed exfil (Day 1: recon, Day 3: exfil)
+    \item Redis-backed stateful tracking (with in-memory fallback)
+\end{itemize}
+
+\vspace{1em}
+
+\textbf{File Context Enrichment:}
+\begin{itemize}
+    \item File sensitivity classification (labels, ownership, sharing history)
+    \item Automatic severity elevation for confidential files
+    \item Workaround for missing doc\_id in Gemini events
+\end{itemize}
+
+\vspace{1em}
+
+\textbf{Intent Classification:}
+\begin{itemize}
+    \item Destination domain reputation (trusted/partner/unknown)
+    \item User behavioral baselines (typical sharing patterns)
+    \item File ownership checks + off-hours detection
+    \item Auto-suppression for legitimate workflows
+\end{itemize}
+\end{frame}
+
 \begin{frame}{Limitations \& Future Work}
 \textbf{Current Limitations:}
 \begin{itemize}
     \item Gemini events only since 2025-06-20
     \item 180-day retention window
-    \item No file content analysis
+    \item Gemini API doesn't expose doc\_id (requires heuristics)
     \item Requires Google Workspace Enterprise
 \end{itemize}
 
@@ -365,10 +407,10 @@ Low & Any permission change within 30 min & Log for analysis \\ \hline
 
 \textbf{Future Extensions:}
 \begin{itemize}
-    \item ML-based user risk scoring
     \item Automated response (revoke links, notify owner)
     \item Integration with HR data (resignations, PIPs)
     \item Cross-correlation with physical security (badge logs)
+    \item Bulk recon + mass exfil detection
 \end{itemize}
 \end{frame}
 

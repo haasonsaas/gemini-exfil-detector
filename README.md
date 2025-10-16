@@ -24,6 +24,18 @@ The **LLM-aided "read-then-share" pattern** that insiders use to rapidly underst
 
 This correlation produces a **high-signal insider-risk detector** without reading any user content.
 
+### Advanced Detection Capabilities
+
+**Multi-Stage Attack Detection**: Tracks cumulative reconnaissance activity with time-decay scoring to catch sophisticated insiders who wait days between recon and exfil (outside immediate correlation windows).
+
+**File Sensitivity Context**: Enriches findings with file metadata (labels, ownership, sharing history) to prioritize high-sensitivity documents and reduce false positives.
+
+**Intent Classification**: Uses behavioral analysis to distinguish malicious exfil from legitimate workflows:
+- Destination domain reputation (partner vs unknown)
+- Historical sharing patterns per user
+- File ownership analysis
+- Off-hours detection
+
 ---
 
 ## Why It Works
@@ -50,12 +62,29 @@ Google's documentation positions these logs for security telemetry:
 
 ## Detection Logic
 
+### Immediate Correlation
 ```
 IF user_action IN {ask_about_this_file, summarize_file, analyze_documents, ...}
    AND app_name IN {docs, drive, sheets, slides}
    AND (within 0-30 minutes)
    AND same_user performs {change_visibility, download, export, add_external_acl, ...}
 THEN alert(severity = HIGH/MEDIUM/LOW)
+```
+
+### Multi-Stage Detection
+```
+IF user has cumulative_recon_score > 5.0 (decays with 48hr half-life)
+   AND user performs exfil action
+   EVEN IF outside immediate time window
+THEN alert(severity = MEDIUM, "Delayed exfil after cumulative recon")
+```
+
+### Intent Classification
+```
+IF destination_domain IN trusted_partners
+   OR user shares own_files frequently
+   OR historical_pattern matches current_behavior
+THEN suppress OR downgrade severity
 ```
 
 ### Severity Rubric
@@ -143,7 +172,7 @@ python src/detector.py --config config/config.json --verbose
 }
 ```
 
-### Full Config with Suppressions
+### Full Config with Advanced Features
 
 ```json
 {
@@ -151,6 +180,7 @@ python src/detector.py --config config/config.json --verbose
   "delegated_user": "admin@your-domain.com",
   "customer_id": "my_customer",
   "timezone": "America/Los_Angeles",
+  "redis_url": "redis://localhost:6379/0",
   "suppressions": {
     "allowed_external_domains": [
       "partner-company.com",
@@ -164,6 +194,14 @@ python src/detector.py --config config/config.json --verbose
       "serviceaccount@your-domain.com"
     ]
   },
+  "partner_domains": [
+    "trusted-partner.com",
+    "vendor-api.com"
+  ],
+  "high_risk_folders": [
+    "1abc_exec_folder_id",
+    "2def_finance_folder_id"
+  ],
   "severity_overrides": {
     "high_risk_ous": [
       "/Executives",
@@ -182,6 +220,12 @@ python src/detector.py --config config/config.json --verbose
 }
 ```
 
+**New Configuration Options:**
+
+- **`redis_url`** (optional): Redis connection for stateful recon tracking. If not provided, uses in-memory storage (not persistent across runs).
+- **`partner_domains`**: Domains for known partners (reduces false positives but doesn't auto-suppress like `allowed_external_domains`).
+- **`high_risk_folders`**: Drive folder IDs containing sensitive files for elevated severity.
+
 ---
 
 ## Setup Guide
@@ -199,7 +243,9 @@ python src/detector.py --config config/config.json --verbose
 1. In service account settings, enable Domain-Wide Delegation
 2. Go to [Google Workspace Admin Console](https://admin.google.com/)
 3. Navigate to **Security → API Controls → Domain-Wide Delegation**
-4. Add Client ID with scope: `https://www.googleapis.com/auth/admin.reports.audit.readonly`
+4. Add Client ID with scopes:
+   - `https://www.googleapis.com/auth/admin.reports.audit.readonly`
+   - `https://www.googleapis.com/auth/drive.readonly` (for file context enrichment)
 
 ### 3. Deploy
 
@@ -229,10 +275,29 @@ Choose your deployment method:
     "recon_time": "2025-01-15T14:18:12-08:00",
     "delta_minutes": 5.55,
     "visibility": "people_with_link",
-    "reason": "External share within 10min of recon",
+    "reason": "External share within 10min of recon; High cumulative recon score (12.5)",
     "event_ids": {
       "recon": "gemini_evt_123",
       "exfil": "drive_evt_456"
+    },
+    "recon_score": 12.5,
+    "file_context": {
+      "sensitivity": "high",
+      "labels": ["confidential", "finance"],
+      "owner": "cfo@your-domain.com",
+      "shared_externally_before": false
+    },
+    "intent_analysis": {
+      "intent": "malicious",
+      "confidence": 0.85,
+      "reasons": [
+        "Destination domain unknown-third-party.com is unknown/untrusted",
+        "User is sharing someone else's file",
+        "First-time share with unknown-third-party.com",
+        "Activity occurred during off-hours"
+      ],
+      "should_suppress": false,
+      "destination_domain": "unknown-third-party.com"
     }
   }
 ]
@@ -312,26 +377,29 @@ Track these metrics for detector health:
 
 ---
 
-## Extensions
+## Built-In Advanced Features
+
+### ✅ Multi-Stage Attack Detection
+Tracks cumulative recon score with 48-hour decay half-life. Detects delayed exfil (Day 1: recon, Day 3: exfil).
+
+### ✅ File Sensitivity Context
+Enriches findings with file labels, ownership, and sharing history. Elevates severity for confidential files.
+
+### ✅ Intent Classification
+Behavioral analysis with domain reputation, user baselines, file ownership, and off-hours detection.
+
+## Future Extensions
 
 ### 1. Bulk Recon + Mass Exfil
-
 Detect `catch_me_up` on entire folders followed by multiple downloads within 1 hour.
 
-### 2. Off-Hours + High-Risk OUs
-
-Elevate severity for Executives/Finance/R&D actors during off-hours (evenings, weekends).
-
-### 3. Web Search → Exfil
-
+### 2. Web Search → Exfil
 Detect `search_web` feature usage (potential data leakage via web results) followed by sharing.
 
-### 4. First-Ever Gemini Usage
-
+### 3. First-Ever Gemini Usage
 Alert on first-time Gemini usage by admins or high-risk users followed by immediate sharing.
 
-### 5. Context Mixing
-
+### 4. Context Mixing
 Detect Gemini usage across multiple sensitive files from different OUs, suggesting reconnaissance.
 
 ---

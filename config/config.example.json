@@ -3,6 +3,7 @@
   "delegated_user": "admin@your-domain.com",
   "customer_id": "my_customer",
   "timezone": "America/Los_Angeles",
+  "redis_url": "redis://localhost:6379/0",
   "suppressions": {
     "allowed_external_domains": [
       "partner-company.com",
@@ -16,6 +17,14 @@
       "serviceaccount@your-domain.com"
     ]
   },
+  "partner_domains": [
+    "trusted-partner.com",
+    "vendor-api.com"
+  ],
+  "high_risk_folders": [
+    "1abc_exec_folder_id",
+    "2def_finance_folder_id"
+  ],
   "severity_overrides": {
     "high_risk_ous": [
       "/Executives",

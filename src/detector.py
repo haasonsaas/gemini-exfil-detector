@@ -34,6 +34,10 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from file_context import FileContextEnricher
+from intent_classifier import IntentClassifier
+from recon_tracker import ReconTracker
+
 VERSION = "1.0.0"
 
 RECON_ACTIONS: Set[str] = {
@@ -109,6 +113,9 @@ class Finding:
     visibility: Optional[str]
     reason: str
     event_ids: Dict[str, str]
+    recon_score: Optional[float] = None
+    file_context: Optional[Dict[str, Any]] = None
+    intent_analysis: Optional[Dict[str, Any]] = None
 
 
 class GeminiExfilDetector:
@@ -118,19 +125,27 @@ class GeminiExfilDetector:
         delegated_user: str,
         customer_id: str = "my_customer",
         timezone: str = "UTC",
+        config: Optional[Dict] = None,
     ):
         self.sa_path = service_account_path
         self.delegated_user = delegated_user
         self.customer_id = customer_id
         self.tz = pytz.timezone(timezone)
+        self.config = config or {}
         self.logger = logging.getLogger(__name__)
         self._service: Optional[Any] = None
+        
+        redis_url = self.config.get("redis_url")
+        self.recon_tracker = ReconTracker(redis_url=redis_url)
+        self.file_enricher: Optional[FileContextEnricher] = None
+        self.intent_classifier: Optional[IntentClassifier] = None
 
     def _get_admin_service(self) -> Any:
         if self._service is None:
             try:
                 scopes = [
-                    "https://www.googleapis.com/auth/admin.reports.audit.readonly"
+                    "https://www.googleapis.com/auth/admin.reports.audit.readonly",
+                    "https://www.googleapis.com/auth/drive.readonly",
                 ]
                 creds = service_account.Credentials.from_service_account_file(
                     self.sa_path, scopes=scopes
@@ -142,6 +157,10 @@ class GeminiExfilDetector:
                 self.logger.info(
                     f"Authenticated as {self.delegated_user} via service account"
                 )
+                
+                self.file_enricher = FileContextEnricher(self._service, self.config)
+                self.intent_classifier = IntentClassifier(self.config, self._service)
+                
             except GoogleAuthError as e:
                 self.logger.error(f"Authentication failed: {e}")
                 raise
@@ -213,15 +232,22 @@ class GeminiExfilDetector:
                     app_name = params.get("app_name")
 
                     if action in RECON_ACTIONS and app_name in RECON_APPS:
-                        recon_events.append(
-                            ReconEvent(
-                                actor=actor,
-                                timestamp=timestamp,
-                                app=app_name,
-                                action=action,
-                                event_id=event_id,
-                            )
+                        recon_event = ReconEvent(
+                            actor=actor,
+                            timestamp=timestamp,
+                            app=app_name,
+                            action=action,
+                            event_id=event_id,
                         )
+                        recon_events.append(recon_event)
+                        
+                        self.recon_tracker.record_recon(
+                            actor=actor,
+                            timestamp=timestamp,
+                            app=app_name,
+                            action=action,
+                        )
+                        
             except (KeyError, ValueError) as e:
                 self.logger.warning(f"Malformed Gemini activity: {e}")
                 continue
@@ -294,39 +320,103 @@ class GeminiExfilDetector:
         for recon in recon_events:
             recon_by_actor[recon.actor].append(recon)
 
+        if self.intent_classifier:
+            self.logger.info("Building user baselines from exfil events")
+            self.intent_classifier.build_baselines_from_history(exfil_events)
+
         for exfil in exfil_events:
+            recon_score = self.recon_tracker.get_recon_score(
+                exfil.actor, exfil.timestamp
+            )
+            
+            matched_recon = False
             for recon in recon_by_actor.get(exfil.actor, []):
                 delta_seconds = (exfil.timestamp - recon.timestamp).total_seconds()
                 delta_minutes = delta_seconds / 60.0
 
                 if 0 <= delta_minutes <= window_minutes:
-                    severity, reason = self._calculate_severity(exfil, delta_minutes)
+                    matched_recon = True
+                    severity, reason = self._calculate_severity(exfil, delta_minutes, recon_score)
 
-                    findings.append(
-                        Finding(
-                            severity=severity,
+                    finding = Finding(
+                        severity=severity,
+                        actor=exfil.actor,
+                        exfil_event=exfil.event_name,
+                        exfil_time=exfil.timestamp.astimezone(self.tz).isoformat(),
+                        doc_id=exfil.doc_id,
+                        doc_title=exfil.doc_title,
+                        recon_action=recon.action,
+                        recon_time=recon.timestamp.astimezone(self.tz).isoformat(),
+                        delta_minutes=round(delta_minutes, 2),
+                        visibility=exfil.visibility,
+                        reason=reason,
+                        event_ids={
+                            "recon": recon.event_id,
+                            "exfil": exfil.event_id,
+                        },
+                        recon_score=recon_score,
+                    )
+                    
+                    finding_dict = asdict(finding)
+                    
+                    if self.file_enricher and exfil.doc_id:
+                        finding_dict = self.file_enricher.enrich_finding(
+                            finding_dict, exfil.doc_id
+                        )
+                    
+                    if self.intent_classifier:
+                        intent_analysis = self.intent_classifier.classify_intent(
                             actor=exfil.actor,
                             exfil_event=exfil.event_name,
-                            exfil_time=exfil.timestamp.astimezone(self.tz).isoformat(),
                             doc_id=exfil.doc_id,
-                            doc_title=exfil.doc_title,
-                            recon_action=recon.action,
-                            recon_time=recon.timestamp.astimezone(self.tz).isoformat(),
-                            delta_minutes=round(delta_minutes, 2),
+                            doc_owner=exfil.owner,
                             visibility=exfil.visibility,
-                            reason=reason,
-                            event_ids={
-                                "recon": recon.event_id,
-                                "exfil": exfil.event_id,
-                            },
+                            timestamp=exfil.timestamp,
+                            new_value=exfil.new_value,
                         )
-                    )
+                        finding_dict["intent_analysis"] = intent_analysis
+                        
+                        if intent_analysis["should_suppress"]:
+                            self.logger.debug(
+                                f"Suppressing finding for {exfil.actor}: {intent_analysis['reasons']}"
+                            )
+                            continue
+                        
+                        if intent_analysis["intent"] == "legitimate":
+                            if finding_dict["severity"] == "high":
+                                finding_dict["severity"] = "medium"
+                            elif finding_dict["severity"] == "medium":
+                                finding_dict["severity"] = "low"
+                    
+                    finding = Finding(**finding_dict)
+                    findings.append(finding)
+            
+            if not matched_recon and recon_score > 5.0:
+                self.logger.info(
+                    f"Delayed exfil detected for {exfil.actor} (recon_score={recon_score})"
+                )
+                finding = Finding(
+                    severity="medium",
+                    actor=exfil.actor,
+                    exfil_event=exfil.event_name,
+                    exfil_time=exfil.timestamp.astimezone(self.tz).isoformat(),
+                    doc_id=exfil.doc_id,
+                    doc_title=exfil.doc_title,
+                    recon_action="cumulative_recon",
+                    recon_time="N/A (multi-stage)",
+                    delta_minutes=0.0,
+                    visibility=exfil.visibility,
+                    reason=f"Delayed exfil after cumulative recon (score={recon_score})",
+                    event_ids={"recon": "N/A", "exfil": exfil.event_id},
+                    recon_score=recon_score,
+                )
+                findings.append(finding)
 
         self.logger.info(f"Generated {len(findings)} findings")
         return findings
 
     def _calculate_severity(
-        self, exfil: ExfilEvent, delta_minutes: float
+        self, exfil: ExfilEvent, delta_minutes: float, recon_score: float = 0.0
     ) -> tuple[str, str]:
         reasons = []
 
@@ -339,18 +429,34 @@ class GeminiExfilDetector:
         if delta_minutes <= 10:
             if is_external_share:
                 reasons.append("External share within 10min of recon")
-                return "high", "; ".join(reasons)
-            if is_export_download:
+                severity = "high"
+            elif is_export_download:
                 reasons.append("Export/download within 10min of recon")
-                return "high", "; ".join(reasons)
-
-        if delta_minutes <= 30:
+                severity = "high"
+            else:
+                reasons.append("Activity within 10min")
+                severity = "medium"
+        elif delta_minutes <= 30:
             if is_external_share or is_export_download:
                 reasons.append("Suspicious activity within 30min")
-                return "medium", "; ".join(reasons)
+                severity = "medium"
+            else:
+                reasons.append("Activity correlation detected")
+                severity = "low"
+        else:
+            reasons.append("Activity correlation detected")
+            severity = "low"
 
-        reasons.append("Activity correlation detected")
-        return "low", "; ".join(reasons)
+        if recon_score >= 10.0:
+            reasons.append(f"High cumulative recon score ({recon_score})")
+            if severity == "medium":
+                severity = "high"
+            elif severity == "low":
+                severity = "medium"
+        elif recon_score >= 5.0:
+            reasons.append(f"Elevated recon score ({recon_score})")
+
+        return severity, "; ".join(reasons)
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -430,6 +536,7 @@ Examples:
             delegated_user=config["delegated_user"],
             customer_id=config.get("customer_id", "my_customer"),
             timezone=config.get("timezone", "UTC"),
+            config=config,
         )
 
         now = dt.datetime.utcnow()
